@@ -1,0 +1,22 @@
+Sprachlupe auf iPhone und Android
+=================================
+
+Dieses Paket enthält dieselbe Sprachlupe für beide Plattformen:
+- Android: Sprachlupe.apk
+- iPhone: Web-App (index.html und die zugehörigen Dateien)
+
+iPhone
+------
+1. Lade alle Dateien dieses Pakets auf einen statischen Webhost mit HTTPS.
+2. Öffne die HTTPS-Adresse in Safari auf dem iPhone.
+3. Tippe auf "Teilen" und dann auf "Zum Home-Bildschirm".
+4. Starte Sprachlupe über das neue Symbol auf dem Home-Bildschirm.
+
+Android
+-------
+1. Öffne die HTTPS-Adresse auf dem Android-Gerät und tippe auf "Sprachlupe-APK herunterladen"; oder kopiere Sprachlupe.apk auf das Gerät.
+2. Öffne die APK und bestätige die Installation. Falls Android danach fragt, erlaube deinem Browser oder Dateimanager die Installation unbekannter Apps.
+
+Wichtig
+-------
+Eine APK lässt sich nicht auf dem iPhone installieren. Für Kamera und Mikrofon muss die Web-App über HTTPS geöffnet werden. Das Paket wird nicht automatisch veröffentlicht; ein HTTPS-Webhost und ein Hosting-Konto sind erforderlich.

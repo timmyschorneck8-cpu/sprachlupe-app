@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#153b35">
+    <meta name="description" content="Sprachlupe vergrößert Texte, erkennt Zeilen und liest ihre Position vor.">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="./manifest.json">
+    <link rel="icon" href="./icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+    <link rel="stylesheet" href="./styles.css">
+    <title>Sprachlupe</title>
+    <script defer src="./app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Sprachlupe Startseite">
+        <span class="brand-mark" aria-hidden="true">⌕</span>
+        <span>Sprachlupe</span>
+      </a>
+      <span class="topbar-note">Vergrößern &amp; finden</span>
+    </header>
+
+    <main class="app">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">Sehen. Finden. Hören.</p>
+        <h1 id="page-title">Was steht wo?</h1>
+        <p>Richte die Kamera auf eine Liste. Sprachlupe erkennt die Zeilen und sagt dir, wo dein gesuchter Eintrag steht.</p>
+      </section>
+
+      <section class="card camera-card" aria-labelledby="camera-title">
+        <div class="section-heading">
+          <div>
+            <p class="step-label">SCHRITT 1</p>
+            <h2 id="camera-title">Text ins Bild nehmen</h2>
+          </div>
+          <span class="camera-indicator" id="camera-indicator">
+            <span class="indicator-dot" aria-hidden="true"></span>
+            <span id="camera-label">Kamera aus</span>
+          </span>
+        </div>
+
+        <div class="viewfinder" id="viewfinder">
+          <video id="camera" autoplay playsinline muted aria-label="Livebild der Kamera"></video>
+          <img id="captured-image" alt="Aufgenommenes Bild mit markierter Fundstelle" hidden>
+          <svg id="image-overlays" class="image-overlays" aria-hidden="true" hidden></svg>
+          <div class="camera-placeholder" id="camera-placeholder">
+            <span class="placeholder-icon" aria-hidden="true">⌕</span>
+            <p>Deine Kameraansicht erscheint hier.</p>
+            <p class="placeholder-tip">Halte die Liste möglichst ruhig und gut beleuchtet.</p>
+          </div>
+        </div>
+        <canvas id="capture-canvas" hidden></canvas>
+
+        <div class="camera-controls">
+          <button class="button button-primary button-large" id="camera-start" type="button">
+            Kamera starten
+          </button>
+          <button class="button button-secondary" id="camera-stop" type="button" hidden>
+            Kamera beenden
+          </button>
+        </div>
+
+        <div class="zoom-control">
+          <label for="zoom">Vergrößerung <output id="zoom-value" for="zoom">1,0×</output></label>
+          <div class="zoom-row">
+            <span aria-hidden="true">−</span>
+            <input id="zoom" type="range" min="1" max="4" step="0.1" value="1" disabled>
+            <span aria-hidden="true">+</span>
+          </div>
+        </div>
+
+        <button class="button button-secondary button-large recognize-button" id="recognize" type="button" disabled>
+          Text erkennen
+        </button>
+        <p class="status" id="camera-status" role="status" aria-live="polite">
+          Starte die Kamera, um den Text zu vergrößern und zu erkennen.
+        </p>
+      </section>
+
+      <section class="card search-card" id="search-card" aria-labelledby="search-title" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="step-label">SCHRITT 2</p>
+            <h2 id="search-title">Eintrag suchen</h2>
+          </div>
+          <span class="line-count" id="line-count"></span>
+        </div>
+
+        <section class="text-selection" aria-labelledby="text-selection-title">
+          <div class="section-heading selection-heading">
+            <div>
+              <p class="step-label">VORLESE-MODUS</p>
+              <h3 id="text-selection-title">Was möchtest du hören?</h3>
+            </div>
+            <span class="line-count" id="selected-line-count" aria-live="polite"></span>
+          </div>
+          <fieldset class="reading-mode" id="reading-mode">
+            <legend>Vorlese-Modus wählen</legend>
+            <label>
+              <input type="radio" name="reading-mode" value="all">
+              Alles vorlesen
+            </label>
+            <label>
+              <input type="radio" name="reading-mode" value="selected" checked>
+              Ausgewählte Zeilen vorlesen
+            </label>
+          </fieldset>
+          <label class="select-all-row" for="select-all-lines">
+            <input id="select-all-lines" type="checkbox" checked>
+            Alle erkannten Zeilen auswählen
+          </label>
+          <ol class="selectable-lines" id="recognized-lines" aria-label="Erkannte Textzeilen auswählen"></ol>
+          <p class="search-hint">Unsichere Textzeilen werden zur Sicherheit nicht vorgelesen oder bei der Suche verwendet.</p>
+          <button class="button button-primary button-large recognize-button" id="read-text" type="button" disabled>
+            <span aria-hidden="true">◖</span>
+            <span id="read-text-label">Auswahl vorlesen</span>
+          </button>
+        </section>
+
+        <div class="search-divider" aria-hidden="true"></div>
+        <h3 class="search-subtitle">Oder in der Liste suchen</h3>
+        <p class="search-question">Was suchst du?</p>
+        <p class="search-hint">Lass dir die Frage vorlesen und nenne den Begriff – oder tippe ihn ein.</p>
+        <div class="search-actions">
+          <button class="button button-primary button-large" id="ask" type="button">
+            <span aria-hidden="true">◖</span> Frage vorlesen
+          </button>
+          <button class="button button-secondary button-large" id="listen" type="button" disabled>
+            <span aria-hidden="true">●</span> Sprechen
+          </button>
+        </div>
+        <p class="status compact-status" id="speech-status" role="status" aria-live="polite"></p>
+
+        <form id="search-form" class="search-form">
+          <label for="query">Gesuchter Begriff</label>
+          <div class="query-row">
+            <input id="query" name="query" type="search" autocomplete="off" placeholder="z. B. Feststellbremse" required>
+            <button class="button button-primary" type="submit">Suchen</button>
+          </div>
+        </form>
+
+        <div id="result" class="result" role="status" aria-live="polite" hidden></div>
+
+      </section>
+
+      <aside class="privacy-note">
+        <strong>Deine Privatsphäre:</strong> Auf Android läuft die Texterkennung mit Google ML Kit auf dem Gerät. Auf dem iPhone wird beim ersten Erkennen Tesseract.js und das deutsche Sprachmodell aus dem Internet geladen. Das Kamerabild wird nicht an einen Server gesendet. Spracheingabe und Vorlesen hängen vom Browser und den Geräteeinstellungen ab.
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <p>Für Android und iPhone · Am besten in Chrome oder Safari</p>
+      <p><strong>iPhone:</strong> In Safari auf „Teilen“ und dann „Zum Home-Bildschirm“ tippen.</p>
+      <p id="android-download-row"><strong>Android:</strong> <a href="./Sprachlupe.apk" download>Sprachlupe-APK herunterladen</a> und die Datei anschließend öffnen.</p>
+    </footer>
+  </body>
+</html>
