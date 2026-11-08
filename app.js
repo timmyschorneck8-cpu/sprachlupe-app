@@ -35,6 +35,8 @@ if (window.AndroidSpeechBridge) {
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const MIN_OCR_CONFIDENCE = 85;
+const OCR_FRAME_COUNT = 3;
+const OCR_FRAME_INTERVAL_MS = 180;
 const searchStopWords = new Set([
   "anlegen", "anzeigen", "bitte", "eintrag", "finden", "ich", "moechte",
   "möchte", "nach", "suche", "suchen", "such", "was",
@@ -249,14 +251,46 @@ function recognizeWithAndroid(canvas) {
   });
 }
 
-function textLinesFromResult(result) {
-  const candidates = (result.lines ?? []).map((line) => ({
+function normalizeOcrText(text) {
+  return text
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLocaleLowerCase("de-DE")
+    .replace(/[^\p{Letter}\p{Number}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function textSimilarity(first, second) {
+  if (first === second) return 1;
+  const previous = Array.from({ length: second.length + 1 }, (_, index) => index);
+  for (let firstIndex = 1; firstIndex <= first.length; firstIndex += 1) {
+    let diagonal = previous[0];
+    previous[0] = firstIndex;
+    for (let secondIndex = 1; secondIndex <= second.length; secondIndex += 1) {
+      const previousValue = previous[secondIndex];
+      previous[secondIndex] = Math.min(
+        previous[secondIndex] + 1,
+        previous[secondIndex - 1] + 1,
+        diagonal + (first[firstIndex - 1] === second[secondIndex - 1] ? 0 : 1),
+      );
+      diagonal = previousValue;
+    }
+  }
+  return 1 - previous[second.length] / Math.max(first.length, second.length);
+}
+
+function textLinesFromResult(results, frameHeight) {
+  const frames = results.map((result) => (result.lines ?? []).map((line) => ({
     text: line.text?.trim() ?? "",
+    normalizedText: normalizeOcrText(line.text?.trim() ?? ""),
     bbox: line.bbox,
     confidence: Number(line.confidence),
-  }));
-  const lines = candidates.filter((line) => (
+  })));
+  const candidates = frames.flat();
+  const usableCandidates = frames.map((frame) => frame.filter((line) => (
     line.text
+    && line.normalizedText
     && line.bbox
     && Number.isFinite(line.bbox.x0)
     && Number.isFinite(line.bbox.y0)
@@ -266,10 +300,67 @@ function textLinesFromResult(result) {
     && line.bbox.y1 > line.bbox.y0
     && Number.isFinite(line.confidence)
     && line.confidence >= MIN_OCR_CONFIDENCE
-  ));
-  excludedOcrLineCount = candidates.length - lines.length;
+  )));
+  const clusters = [];
 
-  return lines.sort((first, second) => first.bbox.y0 - second.bbox.y0);
+  for (const [frameIndex, lines] of usableCandidates.entries()) {
+    const assignedClusters = new Set();
+    for (const line of lines) {
+      const lineCenterY = (line.bbox.y0 + line.bbox.y1) / 2;
+      const clusterMatch = clusters
+        .map((cluster) => ({
+          cluster,
+          similarity: textSimilarity(line.normalizedText, cluster.normalizedText),
+          verticalDistance: Math.abs(lineCenterY - cluster.centerY) / frameHeight,
+        }))
+        .filter(({ cluster, similarity, verticalDistance }) => (
+          !cluster.observations.has(frameIndex)
+          && !assignedClusters.has(cluster)
+          && similarity >= 0.82
+          && verticalDistance <= 0.2
+        ))
+        .sort((first, second) => second.similarity - first.similarity)[0];
+
+      const cluster = clusterMatch?.cluster ?? {
+        normalizedText: line.normalizedText,
+        centerY: lineCenterY,
+        observations: new Map(),
+      };
+      cluster.observations.set(frameIndex, line);
+      cluster.centerY = [...cluster.observations.values()]
+        .reduce((sum, observation) => sum + (observation.bbox.y0 + observation.bbox.y1) / 2, 0)
+        / cluster.observations.size;
+      if (!clusterMatch) clusters.push(cluster);
+      assignedClusters.add(cluster);
+    }
+  }
+
+  const minObservations = Math.min(2, usableCandidates.length);
+  const stableClusters = clusters.filter((cluster) => cluster.observations.size >= minObservations);
+  const frameScores = results.map(() => 0);
+  for (const cluster of stableClusters) {
+    for (const [frameIndex, observation] of cluster.observations) {
+      frameScores[frameIndex] += observation.confidence;
+    }
+  }
+  const bestFrameIndex = frameScores.indexOf(Math.max(...frameScores));
+  const lines = stableClusters.map((cluster) => {
+    const observation = cluster.observations.get(bestFrameIndex)
+      ?? [...cluster.observations.values()].sort((first, second) => second.confidence - first.confidence)[0];
+    return {
+      text: observation.text,
+      bbox: observation.bbox,
+    };
+  });
+  excludedOcrLineCount = candidates.length - stableClusters.reduce(
+    (count, cluster) => count + cluster.observations.size,
+    0,
+  );
+
+  return {
+    lines: lines.sort((first, second) => first.bbox.y0 - second.bbox.y0),
+    bestFrameIndex,
+  };
 }
 
 function renderRecognizedLines() {
@@ -355,36 +446,53 @@ async function recognizeText() {
   clearMatchHighlight();
 
   try {
-    setCameraStatus("Bild wird aufgenommen …");
-    const canvas = captureVisibleFrame();
+    setCameraStatus(`Nehme ${OCR_FRAME_COUNT} kurze Bilder auf, damit Zittern ausgeglichen wird …`);
+    const frames = [];
+    for (let frameIndex = 0; frameIndex < OCR_FRAME_COUNT; frameIndex += 1) {
+      const currentFrame = captureVisibleFrame();
+      const frame = document.createElement("canvas");
+      frame.width = currentFrame.width;
+      frame.height = currentFrame.height;
+      frame.getContext("2d").drawImage(currentFrame, 0, 0);
+      frames.push(frame);
+      if (frameIndex < OCR_FRAME_COUNT - 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, OCR_FRAME_INTERVAL_MS));
+      }
+    }
+
+    const canvas = frames[0];
     elements.capturedImage.src = canvas.toDataURL("image/jpeg", 0.92);
     elements.capturedImage.hidden = false;
     elements.camera.hidden = true;
     elements.imageOverlays.setAttribute("viewBox", `0 0 ${canvas.width} ${canvas.height}`);
     elements.imageOverlays.hidden = true;
 
-    let data;
-    if (window.AndroidSpeechBridge) {
-      setCameraStatus("Text wird mit der Android-Texterkennung gelesen …");
-      try {
-        data = await recognizeWithAndroid(canvas);
-        if (!data.lines?.some((line) => line.text?.trim() && line.bbox)) {
-          throw new Error("Die Android-Texterkennung hat keinen klaren Text erkannt.");
+    const results = [];
+    for (const [frameIndex, frame] of frames.entries()) {
+      setCameraStatus(`Prüfe Bild ${frameIndex + 1} von ${frames.length} auf wiederkehrenden Text …`);
+      let data;
+      if (window.AndroidSpeechBridge) {
+        try {
+          data = await recognizeWithAndroid(frame);
+        } catch (error) {
+          console.warn("Android-Texterkennung fehlgeschlagen; nutze die Browser-Texterkennung.", error);
+          setCameraStatus("Android-Erkennung nicht verfügbar. Verwende die alternative Texterkennung …");
+          data = (await (await getOcrWorker()).recognize(frame)).data;
         }
-      } catch (error) {
-        console.warn("Android-Texterkennung fehlgeschlagen; nutze die Browser-Texterkennung.", error);
-        setCameraStatus("Android-Erkennung ohne Treffer. Starte die alternative Texterkennung …");
-        data = (await (await getOcrWorker()).recognize(canvas)).data;
+      } else {
+        data = (await (await getOcrWorker()).recognize(frame)).data;
       }
-    } else {
-      data = (await (await getOcrWorker()).recognize(canvas)).data;
+      results.push(data);
     }
-    recognizedLines = textLinesFromResult(data);
+
+    const mergedResult = textLinesFromResult(results, canvas.height);
+    elements.capturedImage.src = frames[mergedResult.bestFrameIndex].toDataURL("image/jpeg", 0.92);
+    recognizedLines = mergedResult.lines;
     renderRecognizedLines();
 
     if (recognizedLines.length === 0) {
       setCameraStatus(excludedOcrLineCount
-        ? "Die erkannten Zeilen waren unsicher und werden nicht vorgelesen. Halte die Liste ruhig, näher und gut beleuchtet ins Bild und versuche es erneut."
+        ? "Die Zeilen waren verwackelt oder unsicher und wurden ausgeblendet. Halte die Kamera einen Moment stiller und versuche es erneut."
         : "Kein Text erkannt. Richte die Kamera auf die Liste, verbessere das Licht und versuche es erneut.");
       return;
     }
@@ -397,7 +505,7 @@ async function recognizeText() {
     const certaintyNote = excludedOcrLineCount
       ? ` ${excludedOcrLineCount} unsichere Zeilen wurden ausgeblendet.`
       : "";
-    setCameraStatus(`${recognizedLines.length} sichere Textzeilen erkannt.${certaintyNote} Frage vorlesen lassen und den gesuchten Begriff nennen.`);
+    setCameraStatus(`${recognizedLines.length} stabile Textzeilen erkannt.${certaintyNote} Frage vorlesen lassen und den gesuchten Begriff nennen.`);
     elements.searchCard.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
     setCameraStatus(error.message || "Die Texterkennung ist fehlgeschlagen. Bitte versuche es erneut.");
