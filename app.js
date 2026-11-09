@@ -7,6 +7,8 @@ const elements = {
   cameraStart: document.querySelector("#camera-start"),
   cameraStatus: document.querySelector("#camera-status"),
   cameraStop: document.querySelector("#camera-stop"),
+  cameraTarget: document.querySelector("#camera-target"),
+  cameraTargetHint: document.querySelector("#camera-target-hint"),
   canvas: document.querySelector("#capture-canvas"),
   capturedImage: document.querySelector("#captured-image"),
   imageOverlays: document.querySelector("#image-overlays"),
@@ -37,6 +39,8 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 const MIN_OCR_CONFIDENCE = 85;
 const OCR_FRAME_COUNT = 3;
 const OCR_FRAME_INTERVAL_MS = 180;
+const ETS2_FRAME_COUNT = 5;
+const ETS2_FRAME_INTERVAL_MS = 220;
 const searchStopWords = new Set([
   "anlegen", "anzeigen", "bitte", "eintrag", "finden", "ich", "moechte",
   "möchte", "nach", "suche", "suchen", "such", "was",
@@ -56,6 +60,23 @@ function setCameraStatus(message) {
 
 function setSpeechStatus(message) {
   elements.speechStatus.textContent = message;
+}
+
+function getCameraTarget() {
+  return elements.cameraTarget.querySelector('input[name="camera-target"]:checked')?.value ?? "paper";
+}
+
+function updateCameraTarget() {
+  const isEts2 = getCameraTarget() === "ets2";
+  elements.viewfinder.classList.toggle("is-game-screen", isEts2);
+  elements.cameraTargetHint.textContent = isEts2
+    ? "ETS2 pausieren, Handy quer halten und den Bildschirm ohne Spiegelung ausrichten. Fünf Bilder gleichen leichtes Zittern und Monitorflackern aus."
+    : "Für bessere Erkennung halte den Text gut beleuchtet in die Mitte.";
+  if (cameraStream) {
+    setCameraStatus(isEts2
+      ? "ETS2-Modus bereit. Richte das Handy auf den pausierten Spielbildschirm."
+      : "Kamera bereit. Stelle den Text scharf und tippe auf „Text erkennen“.");
+  }
 }
 
 function speak(text) {
@@ -280,7 +301,7 @@ function textSimilarity(first, second) {
   return 1 - previous[second.length] / Math.max(first.length, second.length);
 }
 
-function textLinesFromResult(results, frameHeight) {
+function textLinesFromResult(results, frameHeight, minObservations = 2) {
   const frames = results.map((result) => (result.lines ?? []).map((line) => ({
     text: line.text?.trim() ?? "",
     normalizedText: normalizeOcrText(line.text?.trim() ?? ""),
@@ -335,8 +356,8 @@ function textLinesFromResult(results, frameHeight) {
     }
   }
 
-  const minObservations = Math.min(2, usableCandidates.length);
-  const stableClusters = clusters.filter((cluster) => cluster.observations.size >= minObservations);
+  const requiredObservations = Math.min(minObservations, usableCandidates.length);
+  const stableClusters = clusters.filter((cluster) => cluster.observations.size >= requiredObservations);
   const frameScores = results.map(() => 0);
   for (const cluster of stableClusters) {
     for (const [frameIndex, observation] of cluster.observations) {
@@ -438,6 +459,9 @@ function highlightLine(lineIndex) {
 }
 
 async function recognizeText() {
+  const isEts2 = getCameraTarget() === "ets2";
+  const frameCount = isEts2 ? ETS2_FRAME_COUNT : OCR_FRAME_COUNT;
+  const frameInterval = isEts2 ? ETS2_FRAME_INTERVAL_MS : OCR_FRAME_INTERVAL_MS;
   elements.recognize.disabled = true;
   elements.readText.hidden = true;
   elements.readText.disabled = true;
@@ -446,17 +470,19 @@ async function recognizeText() {
   clearMatchHighlight();
 
   try {
-    setCameraStatus(`Nehme ${OCR_FRAME_COUNT} kurze Bilder auf, damit Zittern ausgeglichen wird …`);
+    setCameraStatus(isEts2
+      ? `Nehme ${frameCount} Bildschirmbilder auf, damit Zittern und Monitorflackern ausgeglichen werden …`
+      : `Nehme ${frameCount} kurze Bilder auf, damit Zittern ausgeglichen wird …`);
     const frames = [];
-    for (let frameIndex = 0; frameIndex < OCR_FRAME_COUNT; frameIndex += 1) {
+    for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
       const currentFrame = captureVisibleFrame();
       const frame = document.createElement("canvas");
       frame.width = currentFrame.width;
       frame.height = currentFrame.height;
       frame.getContext("2d").drawImage(currentFrame, 0, 0);
       frames.push(frame);
-      if (frameIndex < OCR_FRAME_COUNT - 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, OCR_FRAME_INTERVAL_MS));
+      if (frameIndex < frameCount - 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, frameInterval));
       }
     }
 
@@ -485,7 +511,7 @@ async function recognizeText() {
       results.push(data);
     }
 
-    const mergedResult = textLinesFromResult(results, canvas.height);
+    const mergedResult = textLinesFromResult(results, canvas.height, isEts2 ? 3 : 2);
     elements.capturedImage.src = frames[mergedResult.bestFrameIndex].toDataURL("image/jpeg", 0.92);
     recognizedLines = mergedResult.lines;
     renderRecognizedLines();
@@ -696,6 +722,7 @@ function startListening() {
 elements.cameraStart.addEventListener("click", startCamera);
 elements.cameraStop.addEventListener("click", stopCamera);
 elements.recognize.addEventListener("click", recognizeText);
+elements.cameraTarget.addEventListener("change", updateCameraTarget);
 elements.readText.addEventListener("click", readRecognizedText);
 elements.ask.addEventListener("click", askWhatToFind);
 elements.listen.addEventListener("click", startListening);

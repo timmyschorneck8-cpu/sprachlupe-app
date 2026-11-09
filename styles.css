@@ -173,6 +173,14 @@ h1 {
   isolation: isolate;
 }
 
+.viewfinder.is-game-screen {
+  aspect-ratio: 16 / 9;
+}
+
+.camera-target {
+  margin-bottom: 8px;
+}
+
 .viewfinder video,
 .viewfinder img {
   position: absolute;

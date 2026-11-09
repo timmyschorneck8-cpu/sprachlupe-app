@@ -42,6 +42,19 @@
           </span>
         </div>
 
+        <fieldset class="reading-mode camera-target" id="camera-target">
+          <legend>Was möchtest du lesen?</legend>
+          <label>
+            <input type="radio" name="camera-target" value="paper" checked>
+            Papier oder Buch
+          </label>
+          <label>
+            <input type="radio" name="camera-target" value="ets2">
+            ETS2 auf einem Bildschirm
+          </label>
+        </fieldset>
+        <p class="search-hint" id="camera-target-hint" aria-live="polite">Für bessere Erkennung halte den Text gut beleuchtet in die Mitte.</p>
+
         <div class="viewfinder" id="viewfinder">
           <video id="camera" autoplay playsinline muted aria-label="Livebild der Kamera"></video>
           <img id="captured-image" alt="Aufgenommenes Bild mit markierter Fundstelle" hidden>
