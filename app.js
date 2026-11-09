@@ -16,6 +16,7 @@ const elements = {
   imageOverlays: document.querySelector("#image-overlays"),
   lineCount: document.querySelector("#line-count"),
   listen: document.querySelector("#listen"),
+  nextImageResults: document.querySelector("#next-image-results"),
   query: document.querySelector("#query"),
   readText: document.querySelector("#read-text"),
   readTextLabel: document.querySelector("#read-text-label"),
@@ -347,6 +348,7 @@ function returnToLiveCamera() {
   elements.imageOverlays.hidden = true;
   elements.readText.hidden = true;
   elements.readText.disabled = true;
+  elements.nextImageResults.hidden = true;
   recognizedLines = [];
   excludedOcrLineCount = 0;
   elements.recognize.disabled = !cameraStream;
@@ -664,6 +666,7 @@ async function recognizeText() {
   elements.recognize.disabled = true;
   elements.readText.hidden = true;
   elements.readText.disabled = true;
+  elements.nextImageResults.hidden = true;
   elements.result.hidden = true;
   elements.searchCard.hidden = true;
   elements.cameraCapture.hidden = true;
@@ -725,6 +728,7 @@ async function recognizeText() {
 
     elements.readText.hidden = false;
     elements.readText.disabled = false;
+    elements.nextImageResults.hidden = false;
     elements.searchCard.hidden = false;
     elements.listen.disabled = true;
     elements.result.hidden = true;
@@ -925,6 +929,7 @@ elements.cameraStart.addEventListener("click", startCamera);
 elements.cameraStop.addEventListener("click", stopCamera);
 elements.cameraCapture.addEventListener("click", captureFocusedFrame);
 elements.cameraRetake.addEventListener("click", returnToLiveCamera);
+elements.nextImageResults.addEventListener("click", returnToLiveCamera);
 elements.recognize.addEventListener("click", recognizeText);
 elements.cameraTarget.addEventListener("change", updateCameraTarget);
 elements.readText.addEventListener("click", readRecognizedText);
