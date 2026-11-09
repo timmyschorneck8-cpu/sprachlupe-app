@@ -5,7 +5,9 @@ const elements = {
   cameraIndicator: document.querySelector("#camera-indicator"),
   cameraPlaceholder: document.querySelector("#camera-placeholder"),
   cameraStart: document.querySelector("#camera-start"),
+  cameraCapture: document.querySelector("#camera-capture"),
   cameraStatus: document.querySelector("#camera-status"),
+  cameraRetake: document.querySelector("#camera-retake"),
   cameraStop: document.querySelector("#camera-stop"),
   cameraTarget: document.querySelector("#camera-target"),
   cameraTargetHint: document.querySelector("#camera-target-hint"),
@@ -28,6 +30,7 @@ const elements = {
   speechStatus: document.querySelector("#speech-status"),
   viewfinder: document.querySelector("#viewfinder"),
   zoom: document.querySelector("#zoom"),
+  zoomHint: document.querySelector("#zoom-hint"),
   zoomValue: document.querySelector("#zoom-value"),
 };
 
@@ -53,6 +56,10 @@ let ocrWorkerPromise;
 let tesseractScriptPromise;
 let activeRecognition;
 let isReadingText = false;
+let cameraOpticalZoom = 1;
+let resultDirection = "top";
+let zoomUpdateToken = 0;
+let capturedFrame;
 
 function setCameraStatus(message) {
   elements.cameraStatus.textContent = message;
@@ -69,14 +76,65 @@ function getCameraTarget() {
 function updateCameraTarget() {
   const isEts2 = getCameraTarget() === "ets2";
   elements.viewfinder.classList.toggle("is-game-screen", isEts2);
+  elements.camera.closest(".app").classList.toggle("is-game-mode", isEts2);
+  elements.camera.closest(".camera-card").classList.toggle("is-game-mode", isEts2);
+  elements.zoom.max = isEts2 ? "20" : "10";
+  elements.zoom.value = "1";
+  cameraOpticalZoom = 1;
+  elements.viewfinder.style.setProperty("--zoom", "1");
+  elements.zoomValue.value = "1,0×";
+  resultDirection = isEts2 ? "left" : "top";
   elements.cameraTargetHint.textContent = isEts2
     ? "ETS2 pausieren, Handy quer halten und den Bildschirm ohne Spiegelung ausrichten. Fünf Bilder gleichen leichtes Zittern und Monitorflackern aus."
     : "Für bessere Erkennung halte den Text gut beleuchtet in die Mitte.";
-  if (cameraStream) {
-    setCameraStatus(isEts2
-      ? "ETS2-Modus bereit. Richte das Handy auf den pausierten Spielbildschirm."
-      : "Kamera bereit. Stelle den Text scharf und tippe auf „Text erkennen“.");
+  elements.zoomHint.textContent = isEts2
+    ? "Spielbildschirm weiter weg? Bis 20× vergrößern. Optischer Kamerazoom wird, wenn verfügbar, automatisch genutzt."
+    : "Weiter entfernten Text bis 10× vergrößern. Optischer Kamerazoom wird, wenn verfügbar, automatisch genutzt.";
+  if (recognizedLines.length > 0) {
+    recognizedLines = [];
+    elements.searchCard.hidden = true;
+    elements.result.hidden = true;
+    elements.recognizedLines.replaceChildren();
+    clearMatchHighlight();
+    setCameraStatus("Lesemodus geändert. Erkenne den Text noch einmal.");
   }
+  if (cameraStream) {
+    void updateCameraZoom();
+    if (recognizedLines.length === 0) {
+      setCameraStatus(isEts2
+        ? "ETS2-Modus bereit. Richte das Handy auf den pausierten Spielbildschirm."
+        : "Kamera bereit. Stelle den Text scharf und tippe auf „Text erkennen“.");
+    }
+  }
+}
+
+async function updateCameraZoom() {
+  const updateToken = ++zoomUpdateToken;
+  const requestedZoom = Number(elements.zoom.value);
+  const videoTrack = cameraStream?.getVideoTracks()[0];
+  cameraOpticalZoom = 1;
+
+  if (videoTrack?.applyConstraints && videoTrack.getCapabilities) {
+    try {
+      const zoomRange = videoTrack.getCapabilities().zoom;
+      if (zoomRange && Number.isFinite(zoomRange.max)) {
+        const targetZoom = Math.min(requestedZoom, zoomRange.max);
+        if (targetZoom > (zoomRange.min ?? 1)) {
+          await videoTrack.applyConstraints({ advanced: [{ zoom: targetZoom }] });
+          if (updateToken !== zoomUpdateToken) return;
+          cameraOpticalZoom = targetZoom;
+        }
+      }
+    } catch (error) {
+      if (updateToken !== zoomUpdateToken) return;
+      cameraOpticalZoom = 1;
+      elements.zoomHint.textContent = "Optischer Zoom ist auf dieser Kamera nicht verfügbar; die digitale Vergrößerung wird verwendet.";
+    }
+  }
+
+  if (updateToken !== zoomUpdateToken) return;
+  const digitalZoom = Math.max(1, requestedZoom / cameraOpticalZoom);
+  elements.viewfinder.style.setProperty("--zoom", String(digitalZoom));
 }
 
 function speak(text) {
@@ -133,6 +191,7 @@ async function startCamera() {
     elements.capturedImage.hidden = true;
     elements.imageOverlays.hidden = true;
     recognizedLines = [];
+    capturedFrame = undefined;
     elements.recognizedLines.replaceChildren();
     cameraStream = await navigator.mediaDevices.getUserMedia({
       audio: false,
@@ -145,12 +204,16 @@ async function startCamera() {
     });
     elements.camera.srcObject = cameraStream;
     await elements.camera.play();
+    cameraOpticalZoom = 1;
+    await updateCameraZoom();
     elements.cameraPlaceholder.hidden = true;
     elements.camera.hidden = false;
     elements.cameraIndicator.classList.add("is-on");
     elements.cameraLabel.textContent = "Kamera an";
     elements.cameraStart.hidden = true;
     elements.cameraStop.hidden = false;
+    elements.cameraCapture.hidden = false;
+    elements.cameraRetake.hidden = true;
     elements.zoom.disabled = false;
     elements.recognize.disabled = false;
     setCameraStatus("Kamera bereit. Stelle den Text scharf und tippe auf „Text erkennen“.");
@@ -168,6 +231,8 @@ async function startCamera() {
 function stopCamera() {
   cameraStream?.getTracks().forEach((track) => track.stop());
   cameraStream = undefined;
+  cameraOpticalZoom = 1;
+  zoomUpdateToken += 1;
   elements.camera.srcObject = null;
   elements.camera.hidden = true;
   elements.cameraPlaceholder.hidden = false;
@@ -176,6 +241,10 @@ function stopCamera() {
   elements.cameraStart.hidden = false;
   elements.cameraStart.disabled = false;
   elements.cameraStop.hidden = true;
+  elements.cameraCapture.hidden = true;
+  elements.cameraRetake.hidden = true;
+  elements.capturedImage.hidden = true;
+  capturedFrame = undefined;
   elements.zoom.disabled = true;
   elements.recognize.disabled = true;
   setCameraStatus("Kamera beendet. Starte sie erneut, wenn du weiterarbeiten möchtest.");
@@ -200,7 +269,7 @@ function captureVisibleFrame() {
     cropHeight = width / viewAspect;
   }
 
-  const zoom = Number(elements.zoom.value);
+  const zoom = Math.max(1, Number(elements.zoom.value) / cameraOpticalZoom);
   cropWidth /= zoom;
   cropHeight /= zoom;
   const cropX = (width - cropWidth) / 2;
@@ -211,6 +280,77 @@ function captureVisibleFrame() {
   const context = elements.canvas.getContext("2d");
   context.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, elements.canvas.width, elements.canvas.height);
   return elements.canvas;
+}
+
+function copyFrame(source) {
+  const frame = document.createElement("canvas");
+  frame.width = source.width;
+  frame.height = source.height;
+  frame.getContext("2d").drawImage(source, 0, 0);
+  return frame;
+}
+
+async function captureFocusedFrame() {
+  if (!cameraStream) return;
+  elements.cameraCapture.disabled = true;
+  setCameraStatus("Autofokus stellt das Bild scharf …");
+
+  const track = cameraStream.getVideoTracks()[0];
+  let focusModes = [];
+  try {
+    focusModes = track?.getCapabilities?.().focusMode ?? [];
+  } catch {
+    focusModes = [];
+  }
+  const canFocusOnce = Array.isArray(focusModes) && focusModes.includes("single-shot");
+  if (canFocusOnce) {
+    try {
+      await track.applyConstraints({ advanced: [{ focusMode: "single-shot" }] });
+      await new Promise((resolve) => window.setTimeout(resolve, 450));
+    } catch (error) {
+      setCameraStatus("Manueller Fokus ist nicht verfügbar; das Bild wird mit dem normalen Autofokus aufgenommen.");
+    }
+  }
+
+  try {
+    capturedFrame = copyFrame(captureVisibleFrame());
+    elements.capturedImage.src = capturedFrame.toDataURL("image/jpeg", 0.96);
+    elements.capturedImage.hidden = false;
+    elements.camera.hidden = true;
+    elements.cameraCapture.hidden = true;
+    elements.cameraRetake.hidden = false;
+    setCameraStatus("Bild aufgenommen. Prüfe den Fokus; tippe dann auf „Text erkennen“ oder nimm das Bild erneut auf.");
+  } catch (error) {
+    setCameraStatus(error.message || "Das Bild konnte nicht aufgenommen werden.");
+  } finally {
+    if (canFocusOnce && track?.applyConstraints) {
+      try {
+        await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+      } catch {
+        setCameraStatus("Bild aufgenommen. Der Autofokusmodus konnte nicht zurückgesetzt werden.");
+      }
+    }
+    elements.cameraCapture.disabled = false;
+  }
+}
+
+function returnToLiveCamera() {
+  capturedFrame = undefined;
+  elements.capturedImage.hidden = true;
+  elements.camera.hidden = false;
+  elements.cameraRetake.hidden = true;
+  elements.cameraCapture.hidden = !cameraStream;
+  elements.searchCard.hidden = true;
+  elements.result.hidden = true;
+  elements.recognizedLines.replaceChildren();
+  elements.imageOverlays.replaceChildren();
+  elements.imageOverlays.hidden = true;
+  elements.readText.hidden = true;
+  elements.readText.disabled = true;
+  recognizedLines = [];
+  excludedOcrLineCount = 0;
+  elements.recognize.disabled = !cameraStream;
+  setCameraStatus("Bereit für das nächste Bild. Richte die Kamera neu aus oder fokussiere und nimm ein Bild auf.");
 }
 
 function loadTesseractScript() {
@@ -301,13 +441,70 @@ function textSimilarity(first, second) {
   return 1 - previous[second.length] / Math.max(first.length, second.length);
 }
 
-function textLinesFromResult(results, frameHeight, minObservations = 2) {
-  const frames = results.map((result) => (result.lines ?? []).map((line) => ({
-    text: line.text?.trim() ?? "",
-    normalizedText: normalizeOcrText(line.text?.trim() ?? ""),
-    bbox: line.bbox,
-    confidence: Number(line.confidence),
-  })));
+function textBoundsFromPart(part) {
+  const bounds = part.bbox ?? part.boundingBox;
+  if (!bounds) return null;
+  return {
+    x0: bounds.x0 ?? bounds.left,
+    y0: bounds.y0 ?? bounds.top,
+    x1: bounds.x1 ?? bounds.right,
+    y1: bounds.y1 ?? bounds.bottom,
+  };
+}
+
+function splitHorizontalLine(line) {
+  const parts = (line.parts ?? line.words ?? [])
+    .map((part) => ({
+      text: part.text?.trim() ?? "",
+      bbox: textBoundsFromPart(part),
+      confidence: Number(part.confidence ?? line.confidence),
+    }))
+    .filter((part) => part.text && part.bbox)
+    .sort((first, second) => first.bbox.x0 - second.bbox.x0);
+  if (parts.length < 2) return [line];
+
+  const heights = parts.map((part) => part.bbox.y1 - part.bbox.y0).sort((a, b) => a - b);
+  const medianHeight = heights[Math.floor(heights.length / 2)];
+  const gapThreshold = Math.max(8, medianHeight * 0.75);
+  const groups = [];
+  for (const part of parts) {
+    const previousGroup = groups.at(-1);
+    const previousPart = previousGroup?.at(-1);
+    const gap = previousPart ? part.bbox.x0 - previousPart.bbox.x1 : 0;
+    if (!previousGroup || gap > gapThreshold) {
+      groups.push([part]);
+    } else {
+      previousGroup.push(part);
+    }
+  }
+
+  return groups.map((group) => ({
+    text: group.map((part) => part.text).join(" "),
+    bbox: {
+      x0: Math.min(...group.map((part) => part.bbox.x0)),
+      y0: Math.min(...group.map((part) => part.bbox.y0)),
+      x1: Math.max(...group.map((part) => part.bbox.x1)),
+      y1: Math.max(...group.map((part) => part.bbox.y1)),
+    },
+    confidence: group.reduce((sum, part) => sum + part.confidence, 0) / group.length,
+  }));
+}
+
+function textLinesFromResult(results, frameHeight, minObservations = 2, horizontalItems = false) {
+  const frames = results.map((result) => (result.lines ?? []).flatMap((sourceLine) => {
+    const line = {
+      text: sourceLine.text?.trim() ?? "",
+      bbox: textBoundsFromPart(sourceLine),
+      confidence: Number(sourceLine.confidence),
+      parts: sourceLine.parts,
+      words: sourceLine.words,
+    };
+    const entries = horizontalItems ? splitHorizontalLine(line) : [line];
+    return entries.map((entry) => ({
+      ...entry,
+      normalizedText: normalizeOcrText(entry.text),
+    }));
+  }));
   const candidates = frames.flat();
   const usableCandidates = frames.map((frame) => frame.filter((line) => (
     line.text
@@ -379,7 +576,9 @@ function textLinesFromResult(results, frameHeight, minObservations = 2) {
   );
 
   return {
-    lines: lines.sort((first, second) => first.bbox.y0 - second.bbox.y0),
+    lines: lines.sort((first, second) => horizontalItems
+      ? first.bbox.x0 - second.bbox.x0 || first.bbox.y0 - second.bbox.y0
+      : first.bbox.y0 - second.bbox.y0),
     bestFrameIndex,
   };
 }
@@ -467,22 +666,22 @@ async function recognizeText() {
   elements.readText.disabled = true;
   elements.result.hidden = true;
   elements.searchCard.hidden = true;
+  elements.cameraCapture.hidden = true;
+  elements.cameraRetake.hidden = true;
   clearMatchHighlight();
 
   try {
     setCameraStatus(isEts2
       ? `Nehme ${frameCount} Bildschirmbilder auf, damit Zittern und Monitorflackern ausgeglichen werden …`
       : `Nehme ${frameCount} kurze Bilder auf, damit Zittern ausgeglichen wird …`);
-    const frames = [];
-    for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
-      const currentFrame = captureVisibleFrame();
-      const frame = document.createElement("canvas");
-      frame.width = currentFrame.width;
-      frame.height = currentFrame.height;
-      frame.getContext("2d").drawImage(currentFrame, 0, 0);
-      frames.push(frame);
-      if (frameIndex < frameCount - 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, frameInterval));
+    const frames = capturedFrame ? [capturedFrame] : [];
+    if (!capturedFrame) {
+      for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+        const currentFrame = captureVisibleFrame();
+        frames.push(copyFrame(currentFrame));
+        if (frameIndex < frameCount - 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, frameInterval));
+        }
       }
     }
 
@@ -511,9 +710,10 @@ async function recognizeText() {
       results.push(data);
     }
 
-    const mergedResult = textLinesFromResult(results, canvas.height, isEts2 ? 3 : 2);
+    const mergedResult = textLinesFromResult(results, canvas.height, isEts2 ? 3 : 2, isEts2);
     elements.capturedImage.src = frames[mergedResult.bestFrameIndex].toDataURL("image/jpeg", 0.92);
     recognizedLines = mergedResult.lines;
+    resultDirection = isEts2 ? "left" : "top";
     renderRecognizedLines();
 
     if (recognizedLines.length === 0) {
@@ -531,12 +731,13 @@ async function recognizeText() {
     const certaintyNote = excludedOcrLineCount
       ? ` ${excludedOcrLineCount} unsichere Zeilen wurden ausgeblendet.`
       : "";
-    setCameraStatus(`${recognizedLines.length} stabile Textzeilen erkannt.${certaintyNote} Frage vorlesen lassen und den gesuchten Begriff nennen.`);
+    setCameraStatus(`${recognizedLines.length} stabile Textzeilen erkannt.${certaintyNote} Frage vorlesen lassen und den gesuchten Begriff nennen. Tippe auf „Nächstes Bild“, wenn du eine andere Ansicht lesen möchtest.`);
     elements.searchCard.scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
     setCameraStatus(error.message || "Die Texterkennung ist fehlgeschlagen. Bitte versuche es erneut.");
   } finally {
     elements.recognize.disabled = !cameraStream;
+    elements.cameraRetake.hidden = !cameraStream;
   }
 }
 
@@ -643,9 +844,10 @@ function announceSearchResult(query) {
   const best = matches[0];
   const position = best.index + 1;
   const line = recognizedLines[best.index];
+  const direction = resultDirection === "left" ? "von links" : "von oben";
   const message = matches.length > 1 && matches[1].score === best.score
-    ? `„${line.text}“ passt am besten. Der erste passende Eintrag steht an Position ${position} von ${recognizedLines.length}, von oben. Es gibt weitere mögliche Treffer.`
-    : `„${line.text}“ steht an Position ${position} von ${recognizedLines.length}, von oben.`;
+    ? `„${line.text}“ passt am besten. Der erste passende Eintrag steht an Position ${position} von ${recognizedLines.length}, ${direction}. Es gibt weitere mögliche Treffer.`
+    : `„${line.text}“ steht an Position ${position} von ${recognizedLines.length}, ${direction}.`;
   elements.result.textContent = message;
   highlightLine(best.index);
   speak(message);
@@ -721,6 +923,8 @@ function startListening() {
 
 elements.cameraStart.addEventListener("click", startCamera);
 elements.cameraStop.addEventListener("click", stopCamera);
+elements.cameraCapture.addEventListener("click", captureFocusedFrame);
+elements.cameraRetake.addEventListener("click", returnToLiveCamera);
 elements.recognize.addEventListener("click", recognizeText);
 elements.cameraTarget.addEventListener("change", updateCameraTarget);
 elements.readText.addEventListener("click", readRecognizedText);
@@ -743,12 +947,11 @@ elements.searchForm.addEventListener("submit", (event) => {
 });
 elements.zoom.addEventListener("input", () => {
   const zoom = Number(elements.zoom.value);
-  elements.viewfinder.style.setProperty("--zoom", String(zoom));
   elements.zoomValue.value = `${zoom.toFixed(1).replace(".", ",")}×`;
+  void updateCameraZoom();
   clearMatchHighlight();
   if (cameraStream && !elements.capturedImage.hidden) {
-    elements.camera.hidden = false;
-    elements.capturedImage.hidden = true;
+    returnToLiveCamera();
     elements.imageOverlays.hidden = true;
     elements.searchCard.hidden = true;
     elements.result.hidden = true;

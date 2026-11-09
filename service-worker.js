@@ -1,4 +1,4 @@
-const CACHE_NAME = "sprachlupe-shell-v10";
+const CACHE_NAME = "sprachlupe-shell-v12";
 const APP_SHELL = [
   "./",
   "./index.html",

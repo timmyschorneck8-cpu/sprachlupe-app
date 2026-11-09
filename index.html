@@ -74,15 +74,22 @@
           <button class="button button-secondary" id="camera-stop" type="button" hidden>
             Kamera beenden
           </button>
+          <button class="button button-secondary" id="camera-capture" type="button" hidden>
+            Fokussieren &amp; Bild aufnehmen
+          </button>
+          <button class="button button-secondary" id="camera-retake" type="button" hidden>
+            Nächstes Bild
+          </button>
         </div>
 
         <div class="zoom-control">
-          <label for="zoom">Vergrößerung <output id="zoom-value" for="zoom">1,0×</output></label>
+          <label for="zoom">Abstand / Vergrößerung <output id="zoom-value" for="zoom">1,0×</output></label>
           <div class="zoom-row">
             <span aria-hidden="true">−</span>
-            <input id="zoom" type="range" min="1" max="4" step="0.1" value="1" disabled>
+            <input id="zoom" type="range" min="1" max="10" step="0.1" value="1" disabled>
             <span aria-hidden="true">+</span>
           </div>
+          <p class="search-hint zoom-hint" id="zoom-hint">Weiter entfernten Text mit dem Regler vergrößern. Wenn vorhanden, wird der optische Kamerazoom mitgenutzt.</p>
         </div>
 
         <button class="button button-secondary button-large recognize-button" id="recognize" type="button" disabled>

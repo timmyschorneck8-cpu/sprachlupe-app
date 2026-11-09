@@ -83,6 +83,10 @@ summary:focus-visible {
   padding: 27px 0 24px;
 }
 
+.app.is-game-mode {
+  width: min(100% - 12px, 1024px);
+}
+
 .intro {
   padding: 0 3px 20px;
 }
@@ -174,6 +178,16 @@ h1 {
 }
 
 .viewfinder.is-game-screen {
+  aspect-ratio: 16 / 9;
+}
+
+.camera-card.is-game-mode {
+  width: min(100% - 24px, 980px);
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.camera-card.is-game-mode .viewfinder {
   aspect-ratio: 16 / 9;
 }
 
@@ -321,6 +335,11 @@ h1 {
 .zoom-control output {
   color: var(--green);
   font-variant-numeric: tabular-nums;
+}
+
+.zoom-hint {
+  margin: 7px 0 0;
+  font-size: 0.85rem;
 }
 
 .zoom-row {
